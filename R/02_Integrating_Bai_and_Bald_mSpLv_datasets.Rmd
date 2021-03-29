@@ -1,0 +1,481 @@
+---
+title: "Integrating_Bai_and_Bald_mSpLv_datasets"
+author: "Dillon Corvino"
+date: "29/03/2021"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: united
+    highlight: tango
+    df_print: paged
+    code_folding: hide
+editor_options: 
+  chunk_output_type: console
+---
+
+Built with R version `r getRversion()`
+
+## Setup {.tabset}
+
+### Dataset information
+```{r Dataset_Info}
+
+# Liver type 1 innate lymphoid cells develop locally via an interferon-g-dependent loop
+# Lu Bai et al., 2021, Science 
+
+# Organs: Liver 
+# Species: Adult wildtype Mouse
+
+
+# LSM = LinNeg_Sca1Pos_Mac1Pos
+# ILC1P = LinNeg_CD122Pos_CD49aPos
+
+
+
+
+
+```
+
+### Environment
+```{r setup}
+
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,  
+  eval = TRUE, 
+  tidy = TRUE
+)
+
+knitr::opts_knit$set(
+  root.dir = "../"
+)
+
+
+# Environment Set up
+rm(list = ls()) #Clean workspace
+cat("\014")     #Clean Console
+gc() # Free memory
+
+# Establish working directory
+library("rstudioapi")
+
+# Set working directory to source file location
+setwd(dirname(getActiveDocumentContext()$path))
+setwd("..")
+
+# Load packages
+source("R/Load_packages.R", local = knitr::knit_global())
+
+# Create output directories & load custom functions & colour scheme
+source("R/Setup.R", local = knitr::knit_global())
+
+```
+
+### Read and format data
+```{r reading_data}
+
+Bai.seurat <- readRDS("Exported_RDS_files/Bai_combined.rds")
+
+Bald.seurat <- readRDS("Data/Bald_seurat_object_filt.rds")
+
+```
+
+
+### Project onto ref
+```{r project_onto_ref}
+
+DefaultAssay(Bai.seurat) <- "RNA"
+
+DefaultAssay(Bald.seurat) <- "RNA"
+
+
+
+
+
+
+
+dataset.anchors <- FindTransferAnchors(reference = Bai.seurat,
+                                       query = Bald.seurat, 
+                                       dims = 1:30)
+
+
+predictions <- TransferData(anchorset = dataset.anchors,
+                            refdata = Bai.seurat$seurat_clusters, 
+                            dims = 1:30)
+
+
+
+Bald.seurat <- AddMetaData(Bald.seurat,
+                              metadata = predictions)
+
+
+
+
+Bai.seurat <- RunUMAP(Bai.seurat, 
+                      dims = 1:30,
+                      reduction = "pca",
+                      return.model = TRUE)
+
+
+Bald.seurat <- MapQuery(anchorset = dataset.anchors,
+                           reference = Bai.seurat,
+                           query = Bald.seurat, 
+                           refdata = list(celltype = "celltype"),
+                           reference.reduction = "pca", 
+                           reduction.model = "umap")
+
+
+
+p1 <- DimPlot(Bai.seurat, 
+              reduction = "umap", 
+              group.by = "celltype",
+              label = TRUE, 
+              label.size = 3, 
+    repel = TRUE) + 
+  NoLegend() + 
+  ggtitle("Reference annotations")
+
+p2 <- DimPlot(Bald.seurat,
+              reduction = "ref.umap", 
+              group.by = "seurat_clusters",
+              label = TRUE, 
+    label.size = 3,
+    repel = TRUE) + 
+  NoLegend() + 
+  ggtitle("Query transferred labels")
+
+
+p1 + p2
+
+Bald.seurat@meta.data
+
+
+
+```
+
+
+
+
+## Combine datasets {.tabset}
+
+### Integrate data
+
+```{r Integrate_celltypes}
+
+# Set activate assay to RNA
+DefaultAssay(Bai.seurat) <- "RNA"
+DefaultAssay(Bald.seurat) <- "RNA"
+
+
+# Create metadata 
+Bai.seurat@meta.data$dataset <- "Bai"
+Bald.seurat@meta.data$dataset <- "Bald"
+
+
+
+# Create list of seurat objects
+seurat.list <- list(Bai = Bai.seurat, Bald = Bald.seurat)
+
+# Find Integration Anchors
+immune.anchors <- FindIntegrationAnchors(object.list = seurat.list, 
+                                         anchor.features = 2000, 
+                                         scale = TRUE, 
+                                         normalization.method = "LogNormalize", 
+                                         reduction = "cca", 
+                                         l2.norm = TRUE,
+                                         dims = 1:30,
+                                         k.anchor = 5,
+                                         k.filter = 200,
+                                         k.score = 30,
+                                         max.features = 200,
+                                         nn.method = "rann",
+                                         eps = 0,
+                                         verbose = TRUE)
+
+# Integrate dataset
+seurat.combined <- IntegrateData(anchorset = immune.anchors,
+                                 new.assay.name = "integrated",
+                                 normalization.method = "LogNormalize",
+                                 dims = 1:30,
+                                 k.weight = 100,
+                                 sd.weight = 1,
+                                 verbose = TRUE)
+
+
+# Basic overview of data
+seurat.combined # 28488 genes and 12,494 cells 
+
+Bai.seurat # 4,388 cells
+Bald.seurat # 8,106 cells
+
+
+
+# Format metadata in integrated seurat object
+seurat.combined@meta.data$dataset <- factor(seurat.combined@meta.data$dataset, 
+                                             levels = c("Bai", "Bald"))
+
+# Set default assay
+DefaultAssay(seurat.combined) <- "integrated"
+
+
+# Find variable genes
+seurat.combined <- FindVariableFeatures(seurat.combined,
+                                        selection.method = "vst",
+                                        nfeatures = 2000,
+                                        verbose = TRUE)
+# scale data
+seurat.combined <- ScaleData(seurat.combined,
+                             vars.to.regress = c("nCount_RNA", "percent.mito"),
+                             model.use = "linear",
+                             do.scale = TRUE,
+                             do.center = TRUE,
+                             verbose = TRUE)
+
+
+# Remove unnecessary data
+rm(Bai.seurat, 
+   Bald.seurat, 
+   immune.anchors, 
+   seurat.list)
+
+```
+
+
+
+
+
+## Analysis {.tabset}
+### Dim reduction - integrated dataset
+```{r Dim_reduction_integrated_dataset}
+
+# Create output dir
+if(!dir.exists("output/figures/tSNE")){
+  dir.create("output/figures/tSNE", 
+             recursive = T)}
+
+if(!dir.exists("output/figures/UMAP")){
+  dir.create("output/figures/UMAP", 
+             recursive = T)}
+
+
+# Set assay 
+DefaultAssay(seurat.combined) <- "integrated"
+
+###########
+# Run PCA
+###########
+
+seurat.combined <- RunPCA(seurat.combined, 
+                             features = seurat.combined@assays$integrated@var.features,
+                             npcs = 50,
+                             verbose = TRUE, 
+                             rev.pca = TRUE,
+                             seed.use = 42)
+
+
+
+###########
+# tSNE
+###########
+
+
+seurat.combined <- RunTSNE(seurat.combined,
+                           reduction = "pca",
+                           dims = 1:20,
+                           perplexity = 30,
+                           method = "FIt-SNE",
+                           seed.use = 42,
+                           dim.embed = 2)
+
+###########
+# UMAP
+###########
+
+seurat.combined <- RunUMAP(seurat.combined,
+                              reduction = "pca",
+                              dims = 1:20,
+                              umap.method = "uwot", 
+                              n.neighbors = 45, # 5 to 50 // 45
+                              min.dist = 0.5, # Sensible values are in the range 0.001 to 0.5 // 0.5
+                              seed.use = 42)
+
+
+
+
+
+# Cluster identification 
+seurat.combined <- FindNeighbors(seurat.combined,
+                                    dims = 1:30)
+
+seurat.combined <- FindClusters(seurat.combined,
+                                   resolution = 0.4)
+
+
+
+########################
+# Plot Dim reduction
+########################
+
+##############
+# By dataset
+##############
+
+TSNEPlot(seurat.combined,
+         label = TRUE, 
+         group.by = "dataset") + 
+  ggtitle("combined dataset") + 
+  NoLegend()
+
+dev.copy(pdf, "output/figures/tSNE/tSNE_combined_by_celltype.pdf")
+dev.off()
+
+
+UMAPPlot(seurat.combined,
+         label = TRUE,
+         group.by = "dataset") + 
+  ggtitle("combined dataset") + 
+  NoLegend()
+
+dev.copy(pdf, "output/figures/UMAP/UMAP_combined_by_celltype.pdf")
+dev.off()
+
+
+
+
+
+TSNEPlot(seurat.combined,
+         label = TRUE, 
+         group.by = "seurat_clusters") + 
+  ggtitle("combined dataset") + 
+  NoLegend()
+
+
+UMAPPlot(seurat.combined,
+         label = TRUE,
+         group.by = "seurat_clusters") + 
+  ggtitle("combined dataset") + 
+  NoLegend()
+
+
+# UMAP overall visualisation 
+
+p1 <- UMAPPlot(seurat.combined,
+         label = TRUE,
+         group.by = "seurat_clusters") + 
+  ggtitle("Cluster") + 
+  NoLegend()
+
+p2 <- UMAPPlot(seurat.combined,
+         label = TRUE,
+         group.by = "dataset") + 
+  ggtitle("celltype") + 
+  NoLegend()
+
+p1|p2
+
+
+seurat.combined@meta.data
+
+p1 <- UMAPPlot(seurat.combined,
+         label = TRUE,
+         group.by = "seurat_clusters") + 
+  ggtitle("Cluster") + 
+  NoLegend()
+
+p2 <- UMAPPlot(seurat.combined,
+         label = TRUE,
+         group.by = "dataset") + 
+  ggtitle("celltype") + 
+  NoLegend()
+
+
+
+UMAPPlot(seurat.combined,
+         label = TRUE,
+         group.by = "organ") + 
+  ggtitle("Cluster") + 
+  NoLegend()
+
+UMAPPlot(seurat.combined,
+         label = TRUE,
+         pt.size = 2,
+         group.by = "organ_celltype") + 
+  ggtitle("Cluster") + 
+  NoLegend()
+
+UMAPPlot(seurat.combined,
+         label = TRUE,
+         pt.size = 2,
+         group.by = "celltype") + 
+  ggtitle("Cluster") + 
+  NoLegend()
+
+
+
+
+
+
+x <- is.na(seurat.combined@meta.data$celltype)
+y <- is.na(seurat.combined@meta.data$organ_celltype)
+
+seurat.combined@meta.data$cell_label <- seurat.combined@meta.data$celltype
+
+seurat.combined@meta.data$cell_label[x] <- seurat.combined@meta.data$organ_celltype[x]
+
+
+# Format metadata in integrated seurat object
+seurat.combined@meta.data$cell_label <- factor(seurat.combined@meta.data$cell_label, 
+                                             levels = c("Spleen_ILC1", "Liver_ILC1", "Spleen_NK", "Liver_NK", "ILC1P", "LSM"))
+
+
+col.scheme <- rep("grey", 6)
+
+col.scheme[1] <- "Blue"
+
+UMAPPlot(seurat.combined,
+         label = TRUE,
+         pt.size = 2,
+         cols = col.scheme,
+         group.by = "cell_label") + 
+  ggtitle("Cluster")
+
+
+
+Idents(seurat.combined) <- seurat.combined@meta.data$cell_label
+
+temp.seurat <- subset(seurat.combined, idents = c("Spleen_ILC1", "ILC1P", "LSM"))
+
+UMAPPlot(temp.seurat,
+         label = TRUE,
+         pt.size = 2,
+         #cols = c("Red", "grey", "grey", "grey", "grey", "blue"),
+         group.by = "cell_label") + 
+  ggtitle("Cluster")
+
+
+
+x <- prop.table(table(seurat.combined@meta.data$seurat_clusters, seurat.combined@meta.data$cell_label))
+
+barplot(x, legend = T)
+
+sort(x[,1], decreasing = T)
+sort(x[,5], decreasing = T)
+sort(x[,6], decreasing = T)
+
+
+```
+
+
+### Export seurat object
+```{r export_seurat_RDS}
+
+saveRDS(seurat.combined, file = "Exported_RDS_files/Bai_Bald_integrated_dataset.rds")
+
+
+
+```
+
+

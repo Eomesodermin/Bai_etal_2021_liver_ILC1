@@ -96,7 +96,7 @@ LSM.seurat <- CreateSeuratObject(counts = LSM.data,
                                     display.progress = TRUE)
 
 
-saveRDS(LSM.seurat, "Exported_RDS_files/LSM_raw_Seurat_Object.RData")
+saveRDS(LSM.seurat, "Exported_RDS_files/LSM_raw_Seurat_Object.rds")
 
 
 
@@ -109,7 +109,7 @@ ILC1P.seurat <- CreateSeuratObject(counts = ILC1P.data,
                                     display.progress = TRUE)
 
 
-saveRDS(ILC1P.seurat, "Exported_RDS_files/ILC1P_raw_Seurat_Object.RData")
+saveRDS(ILC1P.seurat, "Exported_RDS_files/ILC1P_raw_Seurat_Object.rds")
 
 
 # remove unneeded data
@@ -796,7 +796,7 @@ dev.off()
 ### Export seurat object
 ```{r export_seurat_RDS}
 
-saveRDS(seurat.combined, file = "Exported_RDS_files/seurat_combined.rds")
+saveRDS(seurat.combined, file = "Exported_RDS_files/Bai_combined.rds")
 
 ```
 
