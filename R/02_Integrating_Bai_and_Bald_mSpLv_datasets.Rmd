@@ -93,7 +93,10 @@ DefaultAssay(Bald.seurat) <- "RNA"
 
 
 
+Bai.seurat <- readRDS("Exported_RDS_files/LSM_seurat_filt.rds")
 
+
+Bai.seurat@meta.data
 
 
 
