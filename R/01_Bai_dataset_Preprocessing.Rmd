@@ -1,0 +1,803 @@
+---
+title: "Bai_dataset_Preprocessing"
+author: "Dillon Corvino"
+date: "29/03/2021"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: united
+    highlight: tango
+    df_print: paged
+    code_folding: hide
+editor_options: 
+  chunk_output_type: console
+---
+
+Built with R version `r getRversion()`
+
+## Setup {.tabset}
+
+### Dataset information
+```{r Dataset_Info}
+
+# Liver type 1 innate lymphoid cells develop locally via an interferon-g-dependent loop
+# Lu Bai et al., 2021, Science 
+
+# Organs: Liver 
+# Species: Adult wildtype Mouse
+
+
+# LSM = LinNeg_Sca1Pos_Mac1Pos
+# ILC1P = LinNeg_CD122Pos_CD49aPos
+
+
+```
+
+### Environment
+```{r setup}
+
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,  
+  eval = TRUE, 
+  tidy = TRUE
+)
+
+knitr::opts_knit$set(
+  root.dir = "../"
+)
+
+
+# Environment Set up
+rm(list = ls()) #Clean workspace
+cat("\014")     #Clean Console
+gc() # Free memory
+
+# Establish working directory
+library("rstudioapi")
+
+# Set working directory to source file location
+setwd(dirname(getActiveDocumentContext()$path))
+setwd("..")
+
+# Load packages
+source("R/Load_packages.R", local = knitr::knit_global())
+
+# Create output directories & load custom functions & colour scheme
+source("R/Setup.R", local = knitr::knit_global())
+
+```
+
+### Read and format data
+```{r reading_data}
+
+
+############################
+# Read in sample data
+############################
+
+
+LSM.data <- Read10X("Data/GSE165785_RAW/GSM5049909_LSM/", strip.suffix = TRUE)
+ILC1P.data <- Read10X("Data/GSE165785_RAW/GSM5049912_ILC1P/")
+
+
+# Initialize the Seurat object with the raw (non-normalized data).  
+# Keep all genes expressed in >= 3 cells. 
+# Keep all cells with at least 200 detected genes
+
+LSM.seurat <- CreateSeuratObject(counts = LSM.data, 
+                                    min.cells = 3, 
+                                    min.genes = 200,
+                                    is.expr = 0, # for UMI datasets this should be 0, and is default
+                                    project = "Liver_LSM",
+                                    display.progress = TRUE)
+
+
+saveRDS(LSM.seurat, "Exported_RDS_files/LSM_raw_Seurat_Object.RData")
+
+
+
+
+ILC1P.seurat <- CreateSeuratObject(counts = ILC1P.data, 
+                                    min.cells = 3, 
+                                    min.genes = 200,
+                                    is.expr = 0, # for UMI datasets this should be 0, and is default
+                                    project = "Liver_ILC1P",
+                                    display.progress = TRUE)
+
+
+saveRDS(ILC1P.seurat, "Exported_RDS_files/ILC1P_raw_Seurat_Object.RData")
+
+
+# remove unneeded data
+rm(LSM.data, ILC1P.data)
+
+```
+
+
+### QC & Normalisation
+```{r QC_and_normalisation}
+
+################################################
+#  Get percentage Mitochondria gene expression
+################################################
+
+
+species.ori <- "mouse"
+
+if (species.ori == "mouse") {
+  pat <- "^mt-"
+}else if (species.ori == "human"){
+  pat <- "^MT-"
+}
+  
+
+LSM.seurat[["percent.mito"]] <- PercentageFeatureSet(LSM.seurat, pattern = paste0(pat))
+ILC1P.seurat[["percent.mito"]] <- PercentageFeatureSet(ILC1P.seurat, pattern = paste0(pat))
+
+
+# Authors also state in methods 
+#Cells with more than 5% mitochondrial-associated expressed genes 
+# or with less than 15% ribosome-associated expressed genes were also removed. 
+# QC resulted in 2930 LSM cells and 1208 Lin−CD122+CD49+ cells being retained for further analysis.
+
+# Except this doesnt make sense as nothing is above 1% ribosome?
+# if (species.ori == "mouse") {
+#   pat <- c("^Rps.*-", "^Rpl.*-")
+# }else if (species.ori == "human"){
+#   pat <- c("^RPS.*-", "^RPL.*-")
+# }
+#   
+# 
+# grep(pattern = "^RP.*", x = rownames(x = LSM.seurat@assays$RNA), value = TRUE)
+# 
+# grep(pattern = paste0(pat, collapse = "|"), x = rownames(x = LSM.seurat@assays$RNA), value = TRUE)
+# 
+# 
+# 
+# LSM.seurat[["percent.ribo"]] <- PercentageFeatureSet(LSM.seurat, pattern = paste0(pat, collapse = "|"))
+# ILC1P.seurat[["percent.ribo"]] <- PercentageFeatureSet(ILC1P.seurat, pattern = paste0(pat, collapse = "|"))
+# 
+
+
+
+# LSM 
+VlnPlot(LSM.seurat, 
+        features = c("nFeature_RNA", "nCount_RNA", "percent.mito"), 
+        pt.size = 0.1)
+
+dev.copy(pdf, "output/QC/QC_LSM_nFeature_nCount_RNA_percentMito.pdf")
+dev.off()
+
+# ILC1P
+VlnPlot(ILC1P.seurat, 
+        features = c("nFeature_RNA", "nCount_RNA", "percent.mito"), 
+        pt.size = 0.1)
+
+dev.copy(pdf, "output/QC/QC_ILC1P_nFeature_nCount_RNA_percentMito.pdf")
+dev.off()
+
+
+########################
+#  Filter cells
+########################
+
+
+LSM.seurat.filt <- subset(LSM.seurat, 
+                          subset = nFeature_RNA > 200 & 
+                            nFeature_RNA < 3000 & 
+                            percent.mito < 5)
+
+ILC1P.seurat.filt <- subset(ILC1P.seurat, 
+                            subset = nFeature_RNA > 200 & 
+                              nFeature_RNA < 3000 & 
+                              percent.mito < 5)
+
+
+
+
+# Vis after filtering
+VlnPlot(LSM.seurat.filt, 
+        features = c("nFeature_RNA", "nCount_RNA", "percent.mito"), 
+        pt.size = 0.1)
+
+dev.copy(pdf, "output/QC/QC_LSM_nFeature_nCount_RNA_percentMito_Post_filtering.pdf")
+dev.off()
+
+VlnPlot(ILC1P.seurat.filt, 
+        features = c("nFeature_RNA", "nCount_RNA", "percent.mito"), 
+        pt.size = 0.1)
+
+dev.copy(pdf, "output/QC/QC_ILC1P_nFeature_nCount_RNA_percentMito_Post_filtering.pdf")
+dev.off()
+
+
+########
+# Stats
+########
+
+LSM.seurat # 13,563 genes across 3,133 cells
+LSM.seurat.filt # 13,563 genes across 3,058 cells
+
+# Therefore
+3133 - 3058
+# 75 cells were deleted
+
+
+ILC1P.seurat # 11,643 genes across 1,655 cells
+ILC1P.seurat.filt # 11,643 genes across 1,330 cells
+
+# Therefore
+1655 - 1330
+# 325 cells were deleted
+
+# Manuscript states: 
+# LSM = 2,930 cells 
+# ILC1P = 1,208 cells
+
+# therefore 
+3058 - 2930 # 128 extra LSM cells
+1330 - 1208 # 122 extra ILC1P cells
+
+
+################################################
+# Normalise, scale & find variable genes 
+################################################
+
+###############
+# LSM dataset
+###############
+
+# Normalise RNA data by logNormalize
+LSM.seurat.filt <- NormalizeData(LSM.seurat.filt,
+                                 normalization.method = "LogNormalize",
+                                 scale.factor = 10000,
+                                 verbose = TRUE)
+
+
+# Find variable genes
+LSM.seurat.filt <- FindVariableFeatures(LSM.seurat.filt,
+                                        selection.method = "vst",
+                                        nfeatures = 2000,
+                                        verbose = TRUE)
+
+LSM.seurat.filt <- ScaleData(LSM.seurat.filt,
+                             vars.to.regress = c("nCount_RNA", "percent.mito"),
+                             model.use = "linear",
+                             do.scale = TRUE,
+                             do.center = TRUE,
+                             verbose = TRUE)
+
+
+###############
+# ILC1P dataset
+###############
+
+# Normalise RNA data by logNormalize
+ILC1P.seurat.filt <- NormalizeData(ILC1P.seurat.filt,
+                                 normalization.method = "LogNormalize",
+                                 scale.factor = 10000,
+                                 verbose = TRUE)
+
+
+# Find variable genes
+ILC1P.seurat.filt <- FindVariableFeatures(ILC1P.seurat.filt,
+                                        selection.method = "vst",
+                                        nfeatures = 2000,
+                                        verbose = TRUE)
+
+ILC1P.seurat.filt <- ScaleData(ILC1P.seurat.filt,
+                             vars.to.regress = c("nCount_RNA", "percent.mito"),
+                             model.use = "linear",
+                             do.scale = TRUE,
+                             do.center = TRUE,
+                             verbose = TRUE)
+
+
+###############################
+# Remove unneeded variables
+###############################
+
+rm(LSM.seurat, ILC1P.seurat)
+
+
+```
+
+
+## Unbiased Clustering {.tabset}
+
+### Clustering
+```{r Initial_clustering}
+
+# Create output dir
+if(!dir.exists("output/figures/PCA")){
+  dir.create("output/figures/PCA", 
+             recursive = T)}
+
+
+
+# Set seed for reproducibility
+set.seed(42)
+
+###########
+# Run PCA
+###########
+
+##########
+# LSM
+##########
+
+LSM.seurat.filt <- RunPCA(LSM.seurat.filt, 
+                             features = LSM.seurat.filt@assays$RNA@var.features,
+                             npcs = 50,
+                             verbose = TRUE, 
+                             rev.pca = TRUE,
+                             seed.use = 42)
+
+
+
+##########
+# ILC1P
+##########
+
+ILC1P.seurat.filt <- RunPCA(ILC1P.seurat.filt, 
+                             features = ILC1P.seurat.filt@assays$RNA@var.features,
+                             npcs = 50,
+                             verbose = TRUE, 
+                             rev.pca = TRUE,
+                             seed.use = 42)
+
+
+#########################
+# Plot PCA projection
+#########################
+
+##########
+# LSM
+##########
+
+PCAPlot(LSM.seurat.filt, 
+        dims = c(1, 2),
+        pt.size = 2)
+
+dev.copy(pdf, "output/figures/PCA/PCA_LSM_Dim1_2.pdf")
+dev.off()
+
+PCAPlot(LSM.seurat.filt, 
+        dims = c(2, 3),
+        pt.size = 2)
+
+dev.copy(pdf, "output/figures/PCA/PCA_LSM_Dim2_3.pdf")
+dev.off()
+
+##########
+# ILC1P
+##########
+
+PCAPlot(ILC1P.seurat.filt, 
+        dims = c(1, 2),
+        pt.size = 2)
+
+dev.copy(pdf, "output/figures/PCA/PCA_ILC1P_Dim1_2.pdf")
+dev.off()
+
+PCAPlot(ILC1P.seurat.filt, 
+        dims = c(2, 3),
+        pt.size = 2)
+
+dev.copy(pdf, "output/figures/PCA/PCA_ILC1P_Dim2_3.pdf")
+dev.off()
+
+
+
+##########################
+# Find clusters using PCA
+##########################
+
+##########
+# LSM
+##########
+
+LSM.seurat.filt <- FindNeighbors(LSM.seurat.filt,
+                                    dims = 1:20)
+
+LSM.seurat.filt <- FindClusters(LSM.seurat.filt,
+                                   resolution = 0.5)
+
+
+##########
+# ILC1P
+##########
+
+ILC1P.seurat.filt <- FindNeighbors(ILC1P.seurat.filt,
+                                    dims = 1:20)
+
+ILC1P.seurat.filt <- FindClusters(ILC1P.seurat.filt,
+                                   resolution = 0.5)
+
+```
+
+
+### UMAP and tSNE dim Reduction
+```{r Dim_reduction}
+
+# Create output dir
+if(!dir.exists("output/figures/tSNE")){
+  dir.create("output/figures/tSNE", 
+             recursive = T)}
+
+if(!dir.exists("output/figures/UMAP")){
+  dir.create("output/figures/UMAP", 
+             recursive = T)}
+
+
+# Set assay 
+DefaultAssay(LSM.seurat.filt) <- "RNA"
+DefaultAssay(ILC1P.seurat.filt) <- "RNA"
+
+
+##########################
+# tSNE dim reduction
+##########################
+
+##########
+# LSM
+##########
+
+LSM.seurat.filt <- RunTSNE(LSM.seurat.filt,
+                              reduction = "pca",
+                              dims = 1:20,
+                              perplexity = 30,
+                              method = "FIt-SNE",
+                              seed.use = 42,
+                              dim.embed = 2)
+
+##########
+# ILC1P
+##########
+
+ILC1P.seurat.filt <- RunTSNE(ILC1P.seurat.filt,
+                              reduction = "pca",
+                              dims = 1:20,
+                              perplexity = 30,
+                              method = "FIt-SNE",
+                              seed.use = 42,
+                              dim.embed = 2)
+
+
+##########################
+# UMAP dim reduction
+##########################
+
+##########
+# LSM
+##########
+
+LSM.seurat.filt <- RunUMAP(LSM.seurat.filt,
+                              reduction = "pca",
+                              dims = 1:20,
+                              umap.method = "uwot", 
+                              n.neighbors = 45, # 5 to 50 // 45
+                              min.dist = 0.5, # Sensible values are in the range 0.001 to 0.5 // 0.5
+                              seed.use = 42)
+
+##########
+# ILC1P
+##########
+
+ILC1P.seurat.filt <- RunUMAP(ILC1P.seurat.filt,
+                              reduction = "pca",
+                              dims = 1:20,
+                              umap.method = "uwot", 
+                              n.neighbors = 45, # 5 to 50 // 45
+                              min.dist = 0.5, # Sensible values are in the range 0.001 to 0.5 // 0.5
+                              seed.use = 42)
+
+
+
+
+
+########################
+# Plot Dim reduction
+########################
+
+#########
+# LSM
+#########
+
+
+TSNEPlot(LSM.seurat.filt,
+         label = TRUE, 
+         group.by = "seurat_clusters") + 
+  ggtitle("LSM dataset") + 
+  NoLegend()
+
+dev.copy(pdf, "output/figures/tSNE/tSNE_LSM.pdf")
+dev.off()
+
+
+UMAPPlot(LSM.seurat.filt,
+         label = TRUE,
+         group.by = "seurat_clusters") + 
+  ggtitle("LSM dataset") + 
+  NoLegend()
+
+dev.copy(pdf, "output/figures/UMAP/UMAP_LSM.pdf")
+dev.off()
+
+#########
+# ILC1P
+#########
+
+TSNEPlot(ILC1P.seurat.filt,
+         label = TRUE, 
+         group.by = "seurat_clusters") + 
+  ggtitle("ILC1P dataset") + 
+  NoLegend()
+
+dev.copy(pdf, "output/figures/tSNE/tSNE_ILC1P.pdf")
+dev.off()
+
+
+UMAPPlot(ILC1P.seurat.filt,
+         label = TRUE,
+         group.by = "seurat_clusters") + 
+  ggtitle("ILC1P dataset") + 
+  NoLegend()
+
+dev.copy(pdf, "output/figures/UMAP/UMAP_ILC1P.pdf")
+dev.off()
+
+
+```
+
+## Combine celltypes {.tabset}
+
+### Integrate data
+
+```{r Integrate_celltypes}
+
+# Set activate assay to RNA
+DefaultAssay(LSM.seurat.filt) <- "RNA"
+DefaultAssay(ILC1P.seurat.filt) <- "RNA"
+
+
+# Create metadata 
+LSM.seurat.filt@meta.data$celltype <- "LSM"
+ILC1P.seurat.filt@meta.data$celltype <- "ILC1P"
+
+
+
+# Create list of seurat objects
+seurat.list <- list(LSM = LSM.seurat.filt, ILC1P = ILC1P.seurat.filt)
+
+# Find Integration Anchors
+immune.anchors <- FindIntegrationAnchors(object.list = seurat.list, 
+                                         anchor.features = 2000, 
+                                         scale = TRUE, 
+                                         normalization.method = "LogNormalize", 
+                                         reduction = "cca", 
+                                         l2.norm = TRUE,
+                                         dims = 1:30,
+                                         k.anchor = 5,
+                                         k.filter = 200,
+                                         k.score = 30,
+                                         max.features = 200,
+                                         nn.method = "rann",
+                                         eps = 0,
+                                         verbose = TRUE)
+
+# Integrate dataset
+seurat.combined <- IntegrateData(anchorset = immune.anchors,
+                                 new.assay.name = "integrated",
+                                 normalization.method = "LogNormalize",
+                                 dims = 1:30,
+                                 k.weight = 100,
+                                 sd.weight = 1,
+                                 verbose = TRUE)
+
+
+# Basic overview of data
+seurat.combined # 15,753 genes and 4,388 cells 
+
+LSM.seurat.filt # 3,058 cells
+ILC1P.seurat.filt # 1,330 cells
+
+# Save files 
+saveRDS(LSM.seurat.filt, file = "Exported_RDS_files/LSM_seurat_filt.rds")
+saveRDS(ILC1P.seurat.filt, file = "Exported_RDS_files/ILC1P_seurat_filt.rds")
+
+
+
+
+# Format metadata in integrated seurat object
+seurat.combined@meta.data$celltype <- factor(seurat.combined@meta.data$celltype, 
+                                             levels = c("LSM", "ILC1P"))
+
+# Set default assay
+DefaultAssay(seurat.combined) <- "integrated"
+
+
+# Find variable genes
+seurat.combined <- FindVariableFeatures(seurat.combined,
+                                        selection.method = "vst",
+                                        nfeatures = 2000,
+                                        verbose = TRUE)
+# scale data
+seurat.combined <- ScaleData(seurat.combined,
+                             vars.to.regress = c("nCount_RNA", "percent.mito"),
+                             model.use = "linear",
+                             do.scale = TRUE,
+                             do.center = TRUE,
+                             verbose = TRUE)
+
+
+# Remove unnecessary data
+rm(LSM.seurat.filt, 
+   ILC1P.seurat.filt, 
+   immune.anchors, 
+   seurat.list)
+
+
+
+```
+
+
+
+
+
+## Analysis {.tabset}
+### Dim reduction - integrated dataset
+```{r Dim_reduction_integrated_dataset}
+
+# Create output dir
+if(!dir.exists("output/figures/tSNE")){
+  dir.create("output/figures/tSNE", 
+             recursive = T)}
+
+if(!dir.exists("output/figures/UMAP")){
+  dir.create("output/figures/UMAP", 
+             recursive = T)}
+
+
+# Set assay 
+DefaultAssay(seurat.combined) <- "integrated"
+
+###########
+# Run PCA
+###########
+
+seurat.combined <- RunPCA(seurat.combined, 
+                             features = seurat.combined@assays$integrated@var.features,
+                             npcs = 50,
+                             verbose = TRUE, 
+                             rev.pca = TRUE,
+                             seed.use = 42)
+
+
+
+###########
+# tSNE
+###########
+
+
+seurat.combined <- RunTSNE(seurat.combined,
+                           reduction = "pca",
+                           dims = 1:20,
+                           perplexity = 30,
+                           method = "FIt-SNE",
+                           seed.use = 42,
+                           dim.embed = 2)
+
+###########
+# UMAP
+###########
+
+seurat.combined <- RunUMAP(seurat.combined,
+                              reduction = "pca",
+                              dims = 1:20,
+                              umap.method = "uwot", 
+                              n.neighbors = 45, # 5 to 50 // 45
+                              min.dist = 0.5, # Sensible values are in the range 0.001 to 0.5 // 0.5
+                              seed.use = 42)
+
+
+
+
+
+# Cluster identification 
+seurat.combined <- FindNeighbors(seurat.combined,
+                                    dims = 1:30)
+
+seurat.combined <- FindClusters(seurat.combined,
+                                   resolution = 0.4)
+
+
+
+########################
+# Plot Dim reduction
+########################
+
+##############
+# By celltype
+##############
+
+TSNEPlot(seurat.combined,
+         label = TRUE, 
+         group.by = "celltype") + 
+  ggtitle("combined dataset") + 
+  NoLegend()
+
+dev.copy(pdf, "output/figures/tSNE/tSNE_combined_by_celltype.pdf")
+dev.off()
+
+
+UMAPPlot(seurat.combined,
+         label = TRUE,
+         group.by = "celltype") + 
+  ggtitle("combined dataset") + 
+  NoLegend()
+
+dev.copy(pdf, "output/figures/UMAP/UMAP_combined_by_celltype.pdf")
+dev.off()
+
+
+
+##############
+# By celltype
+##############
+
+TSNEPlot(seurat.combined,
+         label = TRUE, 
+         group.by = "seurat_clusters") + 
+  ggtitle("combined dataset") + 
+  NoLegend()
+
+dev.copy(pdf, "output/figures/tSNE/tSNE_combined_by_seuratcluster.pdf")
+dev.off()
+
+
+UMAPPlot(seurat.combined,
+         label = TRUE,
+         group.by = "seurat_clusters") + 
+  ggtitle("combined dataset") + 
+  NoLegend()
+
+dev.copy(pdf, "output/figures/UMAP/UMAP_combined_by_seuratcluster.pdf")
+dev.off()
+
+
+# UMAP overall visualisation 
+
+p1 <- UMAPPlot(seurat.combined,
+         label = TRUE,
+         group.by = "seurat_clusters") + 
+  ggtitle("Cluster") + 
+  NoLegend()
+
+p2 <- UMAPPlot(seurat.combined,
+         label = TRUE,
+         group.by = "celltype") + 
+  ggtitle("celltype") + 
+  NoLegend()
+
+p1|p2
+
+dev.copy(pdf, "output/figures/UMAP/UMAP_combined_overview.pdf")
+dev.off()
+
+
+```
+
+
+### Export seurat object
+```{r export_seurat_RDS}
+
+saveRDS(seurat.combined, file = "Exported_RDS_files/seurat_combined.rds")
+
+```
+
+
