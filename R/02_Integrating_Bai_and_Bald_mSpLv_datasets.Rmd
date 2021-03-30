@@ -84,84 +84,6 @@ Bald.seurat <- readRDS("Data/Bald_seurat_object_filt.rds")
 ```
 
 
-### Project onto ref
-```{r project_onto_ref}
-
-DefaultAssay(Bai.seurat) <- "RNA"
-
-DefaultAssay(Bald.seurat) <- "RNA"
-
-
-
-Bai.seurat <- readRDS("Exported_RDS_files/LSM_seurat_filt.rds")
-
-
-Bai.seurat@meta.data
-
-
-
-dataset.anchors <- FindTransferAnchors(reference = Bai.seurat,
-                                       query = Bald.seurat, 
-                                       dims = 1:30)
-
-
-predictions <- TransferData(anchorset = dataset.anchors,
-                            refdata = Bai.seurat$seurat_clusters, 
-                            dims = 1:30)
-
-
-
-Bald.seurat <- AddMetaData(Bald.seurat,
-                              metadata = predictions)
-
-
-
-
-Bai.seurat <- RunUMAP(Bai.seurat, 
-                      dims = 1:30,
-                      reduction = "pca",
-                      return.model = TRUE)
-
-
-Bald.seurat <- MapQuery(anchorset = dataset.anchors,
-                           reference = Bai.seurat,
-                           query = Bald.seurat, 
-                           refdata = list(celltype = "celltype"),
-                           reference.reduction = "pca", 
-                           reduction.model = "umap")
-
-
-
-p1 <- DimPlot(Bai.seurat, 
-              reduction = "umap", 
-              group.by = "celltype",
-              label = TRUE, 
-              label.size = 3, 
-    repel = TRUE) + 
-  NoLegend() + 
-  ggtitle("Reference annotations")
-
-p2 <- DimPlot(Bald.seurat,
-              reduction = "ref.umap", 
-              group.by = "seurat_clusters",
-              label = TRUE, 
-    label.size = 3,
-    repel = TRUE) + 
-  NoLegend() + 
-  ggtitle("Query transferred labels")
-
-
-p1 + p2
-
-Bald.seurat@meta.data
-
-
-
-```
-
-
-
-
 ## Combine datasets {.tabset}
 
 ### Integrate data
@@ -173,10 +95,21 @@ DefaultAssay(Bai.seurat) <- "RNA"
 DefaultAssay(Bald.seurat) <- "RNA"
 
 
+# Create a unified metadata column
+Bai.seurat@meta.data$celltype_unified <- Bai.seurat@meta.data$celltype
+Bald.seurat@meta.data$celltype_unified <- Bald.seurat@meta.data$seurat_clusters
+
+# Create matching metadata columns in Bai dataset
+Bai.seurat@meta.data$organ <- "Liver_Bai"
+Bai.seurat@meta.data$organ_celltype <- paste0(Bai.seurat@meta.data$organ, "_", Bai.seurat@meta.data$celltype_unified)
+
 # Create metadata 
 Bai.seurat@meta.data$dataset <- "Bai"
 Bald.seurat@meta.data$dataset <- "Bald"
 
+# set idents 
+Idents(Bai.seurat) <- Bai.seurat@meta.data$celltype_unified
+Idents(Bald.seurat) <- Bald.seurat@meta.data$celltype_unified
 
 
 # Create list of seurat objects
@@ -254,16 +187,6 @@ rm(Bai.seurat,
 ### Dim reduction - integrated dataset
 ```{r Dim_reduction_integrated_dataset}
 
-# Create output dir
-if(!dir.exists("output/figures/tSNE")){
-  dir.create("output/figures/tSNE", 
-             recursive = T)}
-
-if(!dir.exists("output/figures/UMAP")){
-  dir.create("output/figures/UMAP", 
-             recursive = T)}
-
-
 # Set assay 
 DefaultAssay(seurat.combined) <- "integrated"
 
@@ -278,20 +201,6 @@ seurat.combined <- RunPCA(seurat.combined,
                              rev.pca = TRUE,
                              seed.use = 42)
 
-
-
-###########
-# tSNE
-###########
-
-
-seurat.combined <- RunTSNE(seurat.combined,
-                           reduction = "pca",
-                           dims = 1:20,
-                           perplexity = 30,
-                           method = "FIt-SNE",
-                           seed.use = 42,
-                           dim.embed = 2)
 
 ###########
 # UMAP
@@ -308,8 +217,10 @@ seurat.combined <- RunUMAP(seurat.combined,
 
 
 
-
+###########################
 # Cluster identification 
+###########################
+
 seurat.combined <- FindNeighbors(seurat.combined,
                                     dims = 1:30)
 
@@ -318,155 +229,97 @@ seurat.combined <- FindClusters(seurat.combined,
 
 
 
-########################
-# Plot Dim reduction
-########################
+```
+ 
+ 
+### Visualisation of integrated data 
+```{r visualisation_of_integrated_dataset}
 
-##############
-# By dataset
-##############
+# Create output dir
+if(!dir.exists("output/figures/UMAP_integrated_datasets")){
+  dir.create("output/figures/UMAP_integrated_datasets", 
+             recursive = T)}
 
-TSNEPlot(seurat.combined,
-         label = TRUE, 
-         group.by = "dataset") + 
-  ggtitle("combined dataset") + 
-  NoLegend()
 
-dev.copy(pdf, "output/figures/tSNE/tSNE_combined_by_celltype.pdf")
-dev.off()
-
+# Grouped by dataset
 
 UMAPPlot(seurat.combined,
          label = TRUE,
          group.by = "dataset") + 
-  ggtitle("combined dataset") + 
+  ggtitle("Bai & Bald datasets") + 
   NoLegend()
 
-dev.copy(pdf, "output/figures/UMAP/UMAP_combined_by_celltype.pdf")
+dev.copy(pdf, "output/figures/UMAP_integrated_datasets/UMAP_by_dataset.pdf")
+dev.off()
+
+# Grouped by celltype
+
+UMAPPlot(seurat.combined,
+         label = TRUE,
+         group.by = "celltype_unified") + 
+  ggtitle("Bai & Bald datasets")
+
+dev.copy(pdf, "output/figures/UMAP_integrated_datasets/UMAP_by_celltype.pdf")
+dev.off()
+
+# Grouped by organ and celltype
+
+UMAPPlot(seurat.combined,
+         label = TRUE,
+         group.by = "organ_celltype") + 
+  ggtitle("Bai & Bald datasets") 
+
+dev.copy(pdf, "output/figures/UMAP_integrated_datasets/UMAP_by_organ_celltype.pdf")
+dev.off()
+
+# Grouped by organ
+
+UMAPPlot(seurat.combined,
+         label = TRUE,
+         cols = c("red", "Grey", "Blue"),
+         group.by = "organ") + 
+  ggtitle("Bai & Bald datasets") 
+
+dev.copy(pdf, "output/figures/UMAP_integrated_datasets/UMAP_by_organ.pdf")
 dev.off()
 
 
-
-
-
-TSNEPlot(seurat.combined,
-         label = TRUE, 
-         group.by = "seurat_clusters") + 
-  ggtitle("combined dataset") + 
-  NoLegend()
-
+# Grouped by cluster
 
 UMAPPlot(seurat.combined,
          label = TRUE,
          group.by = "seurat_clusters") + 
-  ggtitle("combined dataset") + 
+  ggtitle("Bai & Bald datasets") + 
   NoLegend()
 
+dev.copy(pdf, "output/figures/UMAP_integrated_datasets/UMAP_by_cluster.pdf")
+dev.off()
 
-# UMAP overall visualisation 
 
-p1 <- UMAPPlot(seurat.combined,
+
+# Subset for spleen ILC1s
+Idents(seurat.combined) <- seurat.combined@meta.data$organ_celltype
+
+temp.seurat <- subset(seurat.combined, idents = c("Spleen_ILC1"))
+
+
+p1 <- UMAPPlot(temp.seurat,
          label = TRUE,
+         pt.size = 2,
+         group.by = "organ_celltype") + 
+  ggtitle("Cluster")
+
+p2 <- UMAPPlot(temp.seurat,
+         label = TRUE,
+         pt.size = 2,
          group.by = "seurat_clusters") + 
-  ggtitle("Cluster") + 
-  NoLegend()
-
-p2 <- UMAPPlot(seurat.combined,
-         label = TRUE,
-         group.by = "dataset") + 
-  ggtitle("celltype") + 
-  NoLegend()
+  ggtitle("Cluster")
 
 p1|p2
 
 
-seurat.combined@meta.data
-
-p1 <- UMAPPlot(seurat.combined,
-         label = TRUE,
-         group.by = "seurat_clusters") + 
-  ggtitle("Cluster") + 
-  NoLegend()
-
-p2 <- UMAPPlot(seurat.combined,
-         label = TRUE,
-         group.by = "dataset") + 
-  ggtitle("celltype") + 
-  NoLegend()
-
-
-
-UMAPPlot(seurat.combined,
-         label = TRUE,
-         group.by = "organ") + 
-  ggtitle("Cluster") + 
-  NoLegend()
-
-UMAPPlot(seurat.combined,
-         label = TRUE,
-         pt.size = 2,
-         group.by = "organ_celltype") + 
-  ggtitle("Cluster") + 
-  NoLegend()
-
-UMAPPlot(seurat.combined,
-         label = TRUE,
-         pt.size = 2,
-         group.by = "celltype") + 
-  ggtitle("Cluster") + 
-  NoLegend()
-
-
-
-
-
-
-x <- is.na(seurat.combined@meta.data$celltype)
-y <- is.na(seurat.combined@meta.data$organ_celltype)
-
-seurat.combined@meta.data$cell_label <- seurat.combined@meta.data$celltype
-
-seurat.combined@meta.data$cell_label[x] <- seurat.combined@meta.data$organ_celltype[x]
-
-
-# Format metadata in integrated seurat object
-seurat.combined@meta.data$cell_label <- factor(seurat.combined@meta.data$cell_label, 
-                                             levels = c("Spleen_ILC1", "Liver_ILC1", "Spleen_NK", "Liver_NK", "ILC1P", "LSM"))
-
-
-col.scheme <- rep("grey", 6)
-
-col.scheme[1] <- "Blue"
-
-UMAPPlot(seurat.combined,
-         label = TRUE,
-         pt.size = 2,
-         cols = col.scheme,
-         group.by = "cell_label") + 
-  ggtitle("Cluster")
-
-
-
-Idents(seurat.combined) <- seurat.combined@meta.data$cell_label
-
-temp.seurat <- subset(seurat.combined, idents = c("Spleen_ILC1", "ILC1P", "LSM"))
-
-UMAPPlot(temp.seurat,
-         label = TRUE,
-         pt.size = 2,
-         #cols = c("Red", "grey", "grey", "grey", "grey", "blue"),
-         group.by = "cell_label") + 
-  ggtitle("Cluster")
-
-
-
-x <- prop.table(table(seurat.combined@meta.data$seurat_clusters, seurat.combined@meta.data$cell_label))
-
-barplot(x, legend = T)
-
-sort(x[,1], decreasing = T)
-sort(x[,5], decreasing = T)
-sort(x[,6], decreasing = T)
+dev.copy(pdf, "output/figures/UMAP_integrated_datasets/UMAP_just_spleen_ILC1.pdf")
+dev.off()
 
 
 ```
@@ -476,7 +329,6 @@ sort(x[,6], decreasing = T)
 ```{r export_seurat_RDS}
 
 saveRDS(seurat.combined, file = "Exported_RDS_files/Bai_Bald_integrated_dataset.rds")
-
 
 
 ```
