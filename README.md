@@ -1,2 +1,25 @@
-# Bai_etal_Science_2021
-scRNAseq dataset from Bai et al., Science 2021, LSM cells from mouse liver 
+# Bai et al. 2021 — liver ILC1 development (re-analysis + integration)
+
+Re-analysis of the publicly available single-cell dataset from:
+
+> **Bai L, Vienne M, Tang L, et al. Liver type 1 innate lymphoid cells develop locally via an interferon-γ-dependent loop.**  
+> *Science* 2021. https://doi.org/10.1126/science.aba4177  
+> Data: See original publication (Science 2021, eaba4177)
+
+## Dataset at a glance
+- **System:** Mouse liver type-1 innate lymphoid cells (ILC1) and LSM progenitors
+- **Assay:** 10x Genomics scRNA-seq
+- **Accession / source:** See original publication (Science 2021, eaba4177)
+
+## What this repository does
+Preprocesses the Bai et al. mouse liver ILC1/LSM dataset and integrates it with in-house mouse spleen/liver NK data for a joint NK/ILC1 comparison. See `R/01_Bai_dataset_Preprocessing.Rmd` and `R/02_Integrating_Bai_and_Bald_mSpLv_datasets.Rmd`.
+
+## Repository structure
+- `R/` — analysis pipeline (numbered `.Rmd` scripts run in order)
+- `Setup.R` / `Load_packages.R` — environment setup and package loading
+- Large data objects are **not** tracked in Git — download from the source above.
+- `renv.lock` — pinned package versions for reproducibility (`renv::restore()`).
+
+---
+Part of my NK / T-cell single-cell research programme — see my [GitHub profile](https://github.com/Eomesodermin) and [dilloncorvino.com](https://dilloncorvino.com).  
+Author: **Dillon Corvino**
